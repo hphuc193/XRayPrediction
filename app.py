@@ -76,18 +76,13 @@ disease_info = {
 def load_model(model_path, num_labels):
     model = models.densenet121(pretrained=False)
     model.features.conv0 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-    # Không định nghĩa classifier ngay, load state_dict trước
     state_dict = torch.load(model_path, map_location="cpu")
-    
-    # Kiểm tra số nhãn trong state_dict
     original_num_labels = state_dict["classifier.1.weight"].shape[0]
     model.classifier = nn.Sequential(
         nn.Dropout(p=0.3),
-        nn.Linear(1024, original_num_labels)  # Giữ nguyên số nhãn gốc
+        nn.Linear(1024, original_num_labels)
     )
     model.load_state_dict(state_dict)
-    
-    # Thêm lớp ánh xạ từ original_num_labels về num_labels (15)
     mapping_layer = nn.Linear(original_num_labels, num_labels)
     full_model = nn.Sequential(model, mapping_layer)
     full_model.eval()
@@ -105,20 +100,18 @@ def predict(image, model, all_labels):
     with torch.no_grad():
         output = model(img)
         preds = torch.sigmoid(output).numpy()[0]
-    # In toàn bộ dự đoán để kiểm tra
     print("Raw predictions:", {all_labels[i]: round(preds[i], 4) for i in range(len(all_labels))})
-    # Giảm ngưỡng xuống 0.2 để tăng độ nhạy (điều chỉnh từ 0.9 về 0.2 như file gốc)
     results = {all_labels[i]: round(preds[i], 2) for i in range(len(all_labels)) if preds[i] > 0.8}
-    return results, preds  # Trả về cả results (dự đoán vượt ngưỡng) và preds (toàn bộ xác suất)
+    return results, preds
 
 # Lưu dữ liệu với kiểm tra trùng lặp
 def save_data(image, prediction, user_label=None):
-    os.makedirs("C:/XRayProject/retrain_data", exist_ok=True)
-    img_path = f"C:/XRayProject/retrain_data/{image.name}"
+    os.makedirs("retrain_data", exist_ok=True)  # Đường dẫn tương đối
+    img_path = os.path.join("retrain_data", image.name)
     pil_image = Image.open(image)
     pil_image.save(img_path)
     
-    csv_path = "C:/XRayProject/retrain_data/data.csv"
+    csv_path = "retrain_data/data.csv"  # Đường dẫn tương đối
     if os.path.exists(csv_path):
         df_existing = pd.read_csv(csv_path)
         if img_path in df_existing["image"].values:
@@ -144,10 +137,10 @@ all_labels = sorted([
 menu = ["Dự đoán bệnh", "Thông số model", "Huấn luyện thêm"]
 choice = st.sidebar.selectbox("Chọn chức năng", menu)
 
-model_dir = "C:/XRayProject/models/"
+model_dir = "models/"  # Đường dẫn tương đối
 model_files = [f for f in os.listdir(model_dir) if f.endswith(".pth")] if os.path.exists(model_dir) else []
 if not model_files:
-    st.error("Không tìm thấy model nào trong thư mục C:/XRayProject/models/")
+    st.error(f"Không tìm thấy model nào trong thư mục {model_dir}")
 else:
     selected_model = st.selectbox("Chọn Phiên Bản", model_files)
     model_path = os.path.join(model_dir, selected_model)
@@ -158,7 +151,7 @@ if choice == "Dự đoán bệnh":
     uploaded_file = st.file_uploader("Tải lên ảnh X-quang", type=["png", "jpg", "jpeg"])
     if uploaded_file and model_files:
         st.image(uploaded_file, caption="Ảnh đã tải lên", use_column_width=True)
-        prediction, raw_preds = predict(uploaded_file, model, all_labels)  # Lấy cả results và raw_preds
+        prediction, raw_preds = predict(uploaded_file, model, all_labels)
         st.write("**Kết quả dự đoán:**")
         if prediction:
             for disease, prob in prediction.items():
@@ -166,14 +159,14 @@ if choice == "Dự đoán bệnh":
                 st.write(f"  *Nguyên nhân*: {disease_info[disease]['cause']}")
                 st.write(f"  *Cách giảm tình trạng*: {disease_info[disease]['remedy']}")
         else:
-            st.write("Không phát hiện bệnh nào (xác suất < 0.2)")
+            st.write("Không phát hiện bệnh nào (xác suất < 0.8)")
             st.write(f"  *Nguyên nhân*: {disease_info['No Finding']['cause']}")
             st.write(f"  *Cách giảm tình trạng*: {disease_info['No Finding']['remedy']}")
 
-        # Vẽ biểu đồ cột hiển thị xác suất của tất cả các nhãn
+        # Vẽ biểu đồ cột
         st.subheader("Biểu đồ xác suất các bệnh")
         fig, ax = plt.subplots(figsize=(10, 6))
-        probabilities = raw_preds * 100  # Chuyển đổi sang phần trăm
+        probabilities = raw_preds * 100
         ax.bar(all_labels, probabilities, color='skyblue')
         ax.set_xlabel("Bệnh")
         ax.set_ylabel("Xác suất (%)")
@@ -201,7 +194,7 @@ elif choice == "Thông số model":
                 accuracy = float(f.read())
             st.write(f"**Độ chính xác:** {accuracy:.2%}")
         
-        plot_dir = "C:/XRayProject/plots/"
+        plot_dir = "plots/"  # Đường dẫn tương đối
         if os.path.exists(plot_dir):
             loss_plot = os.path.join(plot_dir, "loss_plot.png")
             accuracy_plot = os.path.join(plot_dir, "accuracy_plot.png")
@@ -212,8 +205,9 @@ elif choice == "Thông số model":
 
 elif choice == "Huấn luyện thêm":
     st.subheader("Huấn luyện thêm với dữ liệu mới")
-    if os.path.exists("C:/XRayProject/retrain_data/data.csv"):
-        df = pd.read_csv("C:/XRayProject/retrain_data/data.csv")
+    csv_path = "retrain_data/data.csv"  # Đường dẫn tương đối
+    if os.path.exists(csv_path):
+        df = pd.read_csv(csv_path)
         st.write(f"Tìm thấy {len(df)} mẫu dữ liệu mới")
         if st.button("Bắt đầu huấn luyện"):
             from train_model import retrain_model
